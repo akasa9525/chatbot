@@ -3,7 +3,7 @@
 Created on Sun Apr 29 12:07:24 2018
 
 @author: Aditya
-Buildig ChatBot usinng eep NLP
+Buildig ChatBot usinng deep NLP
 """
 #Libraries
 import numpy as np
@@ -148,3 +148,92 @@ for length in range(1, 25+1):
         if len(i[1]) == length:
             sorted_clean_questions.append(questions_to_int[i[0]])
             sorted_clean_answers.append(answers_to_int[i[0]])
+            
+            
+###### Building the seq2seq nodel #######
+
+# creating placeholders for the inputs and the targets
+# In tensorflow, all variables are usid in tensors. 
+# tensors are like an advanced array, more advanceed than a numpy array, which is of a single type
+# and allows fastest computations in deep neural network. Tensorflow all the vairable used in tensor
+# must be defined as tensorflow palceholder. this is a kind of more advanced data structure that can contain tensors and other featuires
+# hence our first step in any dnlp is to create some placeholders for the inputs and the targets
+
+def model_inputs():
+    inputs = tf.placeholder(tf.int32, [None,None], name='input')  #tensorflow placeholder(type_of_data, dimensions_of matrix_ofinputdata, name)
+    targets = tf.placeholder(tf.int32, [None,None], name='target')
+    lr = tf.placeholder(tf.float32, name='learning_rate')
+    keep_prob = tf.placeholder(tf.float32, name='keep_prob') #Controls drpout rate
+    return inputs,targets,lr,keep_prob
+
+# Before creating encoding layer of decoding layer we have to preprocess the targets
+#we will feed the neural network with batches of 10 answers at a time.
+# each of the answers in batch of target must start with SOS token
+# s before creating bathces of answers, we need to put sos in start of each answer
+
+def preprocess_targets(targets, word2int, batch_size):
+    left_side = tf.fill([batch_size,1], word2int['<SOS>'])
+    right_side = tf.strided_slice(targets, [0,0], [batch_size, -1], [1,1])
+    preprocessed_targets = tf.concat([left_side, right_side], 1)
+    return preprocessed_targets            
+            
+# Encoder RNN layer
+#basic lstm cell class by tensorflow
+def encoder_rnn_layer(rnn_inputs, rnn_size, num_layers, keep_prob, sequence_length):
+    lstm = tf.contrib.rnn.BasicLSTMCell(rnn_size)
+    #apply dropout to lstm -- deactivating certain percentage of neuron....
+    #keep_prob will conrol the dropout rate
+    lstm_dropout = tf.contrib.rnn.DropoutWrapper(lstm, input_keep_prob = keep_prob)
+    # encoder cell consist of several lstm dropout layer
+    encoder_cell = tf.contrib.rnn.MultiRNNCell([lstm_dropout] * num_layers)
+    _, encoder_state = tf.nn.bidirectional_dynamic_rnn(cell_fw = encoder_cell, cell_bw = encoder_cell, sequence_length = sequence_length, inputs = rnn_inputs, dtype = tf.float32) ## build independent frwrd and bckwrd rnn
+    return encoder_state
+            
+#decoding the training set
+def decode_training_set(encoder_state, decoder_cell, decoder_embedded_input, sequence_length, decoding_scope, output_function, keep_prob, batch_size):
+    attention_states = tf.zeros([batch_size, 1, decoder_cell.output_size])
+    attention_keys, attention_values, attention_score_function, attention_construct_function = tf.contrib.seq2seq.prepare_attention(attention_states, attention_option = 'bahdanau', num_units = decoder_cell.output_size)
+    #attention keys - keys to be compared with the target states
+    #attention values - values that will be use to construct context vectors
+    #attention score - use to get similarity between keys and target states
+    #attention contruct - use to build attenstino state
+    training_decoder_function = tf.contrib.seq2seq.attention_decoder_fn_train(encoder_state[0], attention_keys, attention_values, attention_score_function, attention_construct_function, name= "attn_dec_train")
+    decoder_output, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(decoder_cell, training_decoder_function, decoder_embedded_input, sequence_length, scope = decoding_scope)
+            
+    decoder_output_dropout = tf.nn.dropout(decoder_output, keep_prob)
+    
+    return output_function(decoder_output_dropout)        
+            
+#decoding test/validation set
+def decode_test_set(encoder_state, decoder_cell, decoder_embeddings_matrix, sos_id, eos_id, max_length, num_words, sequence_length, decoding_scope, output_function, keep_prob, batch_size):
+    attention_states = tf.zeros([batch_size, 1, decoder_cell.output_size])
+    attention_keys, attention_values, attention_score_function, attention_construct_function = tf.contrib.seq2seq.prepare_attention(attention_states, attention_option = 'bahdanau', num_units = decoder_cell.output_size)
+    #attention keys - keys to be compared with the target states
+    #attention values - values that will be use to construct context vectors
+    #attention score - use to get similarity between keys and target states
+    #attention contruct - use to build attenstino state
+    test_decoder_function = tf.contrib.seq2seq.attention_decoder_fn_inference(output_function, encoder_state[0], attention_keys, attention_values, attention_score_function, attention_construct_function, decoder_embeddings_matrix, sos_id, eos_id, max_length, num_words, name= "attn_dec_inf")
+    test_predictions, _, _ = tf.contrib.seq2seq.dynamic_rnn_decoder(decoder_cell, test_decoder_function, scope = decoding_scope)
+    
+    return test_predictions          
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
